@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · CMT Deployer{% endblock %}
+{% block meta %}<meta name="csrf-token" content="{{ csrf_token }}">{% endblock %}
+{% block body_attrs %}data-max-upload-mb="{{ max_upload_mb }}"{% endblock %}
+
+{% block content %}
+{% set input_cls = "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50" %}
+{% set btn_secondary = "rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed" %}
+<header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
+  <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+    <div class="flex items-center gap-3">
+      <div class="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-sm font-bold">CMT</div>
+      <div>
+        <h1 class="text-base font-semibold text-white leading-tight">CMT Deployer</h1>
+        <p class="text-xs text-slate-400">Elastic Beanstalk release console</p>
+      </div>
+      {% if dry_run %}
+      <span class="ml-3 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-300 ring-1 ring-amber-500/40">DRY-RUN</span>
+      {% else %}
+      <span class="ml-3 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/40">LIVE</span>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-4 text-sm">
+      <span class="text-slate-400">Signed in as <span class="font-medium text-slate-200">{{ user }}</span></span>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="{{ btn_secondary }}">Sign out</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto grid max-w-7xl gap-6 px-6 py-6 lg:grid-cols-5">
+  <!-- Left column: target + source -->
+  <section class="space-y-6 lg:col-span-2">
+    <!-- 1. Target -->
+    <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">1 · AWS Target</h2>
+        <button id="env-refresh" class="text-xs text-indigo-400 hover:text-indigo-300" type="button">Refresh</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label for="account" class="mb-1 block text-sm text-slate-300">AWS account</label>
+          <select id="account" class="{{ input_cls }}">
+            <option value="">Select account…</option>
+            {% for a in accounts %}
+            <option value="{{ a.key }}">{{ a.name }} · {{ a.region }}{% if a.account_id %} · {{ a.account_id }}{% endif %}{% if a.assume_role %} (assume-role){% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="environment" class="mb-1 block text-sm text-slate-300">Elastic Beanstalk environment</label>
+          <select id="environment" class="{{ input_cls }}" disabled>
+            <option value="">Select an account first</option>
+          </select>
+        </div>
+        <dl id="env-details" class="hidden grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-slate-950/60 p-4 text-sm">
+          <dt class="text-slate-500">Health</dt>
+          <dd class="col-span-2 flex items-center gap-2"><span id="env-health-dot" class="h-2.5 w-2.5 rounded-full bg-slate-500"></span><span id="env-health"></span></dd>
+          <dt class="text-slate-500">Status</dt><dd id="env-status" class="col-span-2"></dd>
+          <dt class="text-slate-500">Application</dt><dd id="env-app" class="col-span-2 break-all"></dd>
+          <dt class="text-slate-500">Version</dt><dd id="env-version" class="col-span-2 font-mono text-xs break-all"></dd>
+          <dt class="text-slate-500">Platform</dt><dd id="env-platform" class="col-span-2 text-xs"></dd>
+          <dt class="text-slate-500">URL</dt><dd id="env-cname" class="col-span-2 break-all text-xs"></dd>
+          <dt class="text-slate-500">Updated</dt><dd id="env-updated" class="col-span-2 text-xs"></dd>
+        </dl>
+      </div>
+    </div>
+
+    <!-- 2. Source -->
+    <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">2 · Code Source</h2>
+      <div class="mb-4 grid grid-cols-2 gap-1 rounded-lg bg-slate-950 p-1" role="tablist">
+        <button type="button" data-tab="upload" class="tab-btn rounded-md px-3 py-1.5 text-sm font-medium" role="tab">Direct upload</button>
+        <button type="button" data-tab="github" class="tab-btn rounded-md px-3 py-1.5 text-sm font-medium" role="tab">GitHub</button>
+      </div>
+
+      <!-- Mode A -->
+      <div id="panel-upload" class="tab-panel space-y-3">
+        <label for="bundle" class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-700 px-4 py-8 text-center hover:border-indigo-500">
+          <span class="text-sm text-slate-300">Choose a <code>.zip</code> source bundle</span>
+          <span class="mt-1 text-xs text-slate-500">Max {{ max_upload_mb }} MB · application files at the zip root</span>
+          <input id="bundle" type="file" accept=".zip,application/zip" class="sr-only">
+        </label>
+        <p id="bundle-info" class="text-sm text-slate-400"></p>
+      </div>
+
+      <!-- Mode B -->
+      <div id="panel-github" class="tab-panel hidden space-y-5">
+        <div class="flex items-center justify-between rounded-lg bg-slate-950/60 px-3 py-2 text-sm">
+          <span id="gh-status" class="text-slate-300"
+                data-login="{{ github_login or '' }}" data-mock="{{ 'true' if github_mock else 'false' }}"></span>
+          <button id="gh-disconnect" type="button" class="hidden text-xs text-red-400 hover:text-red-300">Disconnect</button>
+        </div>
+        <form id="gh-token-form" class="hidden flex gap-2">
+          <input id="gh-token" type="password" autocomplete="off" spellcheck="false" placeholder="GitHub PAT" maxlength="255" class="{{ input_cls }} font-mono">
+          <button class="{{ btn_secondary }} whitespace-nowrap">Save token</button>
+        </form>
+
+        <div class="space-y-3">
+          <div>
+            <label for="repo" class="mb-1 block text-sm text-slate-300">Repository (owner/repo)</label>
+            <div class="flex gap-2">
+              <input id="repo" list="repo-list" placeholder="my-org/my-service" maxlength="200" autocomplete="off" class="{{ input_cls }} font-mono">
+              <datalist id="repo-list"></datalist>
+              <button id="load-branches" type="button" class="{{ btn_secondary }} whitespace-nowrap">Load branches</button>
+            </div>
+          </div>
+          <div>
+            <label for="base-branch" class="mb-1 block text-sm text-slate-300">Base branch</label>
+            <select id="base-branch" class="{{ input_cls }}" disabled><option value="">Load branches first</option></select>
+          </div>
+        </div>
+
+        <fieldset class="space-y-2 rounded-lg border border-slate-800 p-3">
+          <legend class="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Deployment branch</legend>
+          <div class="flex gap-2">
+            <input id="new-branch" maxlength="200" class="{{ input_cls }} font-mono" placeholder="deploy/eb-update-…">
+            <button id="regen-branch" type="button" title="New timestamp" class="{{ btn_secondary }}">&#x21bb;</button>
+          </div>
+          <button id="create-branch" type="button" class="{{ btn_secondary }} w-full">Create branch from base</button>
+        </fieldset>
+
+        <fieldset class="space-y-2 rounded-lg border border-slate-800 p-3">
+          <legend class="px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Commit EB configuration</legend>
+          <label for="procfile-cmd" class="block text-xs text-slate-400">Procfile <code>web:</code> command</label>
+          <input id="procfile-cmd" value="{{ default_procfile }}" maxlength="300" class="{{ input_cls }} font-mono text-xs">
+          <div class="space-y-1 pt-1">
+            {% for path in sample_files %}
+            <label class="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" name="config-file" value="{{ path }}" checked class="rounded border-slate-600 bg-slate-950 text-indigo-600">
+              <code class="text-xs">{{ path }}</code>
+            </label>
+            {% endfor %}
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button id="preview-config" type="button" class="{{ btn_secondary }}">Preview</button>
+            <button id="commit-config" type="button" class="{{ btn_secondary }} flex-1">Commit to deployment branch</button>
+          </div>
+        </fieldset>
+
+        <div>
+          <label for="deploy-ref" class="mb-1 block text-sm text-slate-300">Branch to deploy</label>
+          <input id="deploy-ref" list="branch-list" maxlength="200" autocomplete="off" class="{{ input_cls }} font-mono" placeholder="main">
+          <datalist id="branch-list"></datalist>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Deploy -->
+    <button id="deploy-btn" type="button"
+            class="w-full rounded-xl bg-indigo-600 px-4 py-3 text-base font-semibold text-white shadow-lg hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
+      Deploy to Beanstalk
+    </button>
+  </section>
+
+  <!-- Right column: console -->
+  <section class="lg:col-span-3">
+    <div class="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-2xl border border-slate-800 bg-black">
+      <div class="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-4 py-2">
+        <div class="flex items-center gap-2">
+          <span class="h-3 w-3 rounded-full bg-red-500/80"></span>
+          <span class="h-3 w-3 rounded-full bg-amber-500/80"></span>
+          <span class="h-3 w-3 rounded-full bg-emerald-500/80"></span>
+          <span class="ml-3 text-xs font-medium text-slate-400">deployment console</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="deploy-status" class="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-semibold text-slate-300">idle</span>
+          <button id="clear-console" type="button" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
+        </div>
+      </div>
+      <div id="console" class="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed" aria-live="polite"></div>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js" defer></script>
+{% endblock %}
